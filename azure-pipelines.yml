@@ -1,0 +1,57 @@
+trigger:
+- netstandard
+- rel/*
+
+pr:
+- netstandard
+- rel/*
+
+pool:
+  vmImage: vs2017-win2016
+
+variables: 
+  BuildConfiguration: Release
+
+steps:
+- task: DotNetCoreCLI@2  
+  inputs:
+    command: custom
+    custom: tool
+    arguments: install --tool-path . nbgv
+  displayName: Install NBGV tool
+
+- script: nbgv cloud
+  displayName: Set Version
+
+- task: DotNetCoreCLI@2
+  inputs:
+    command: pack
+    packagesToPack: .\crypto\src\crypto.csproj
+    packDirectory: $(Build.ArtifactStagingDirectory)\Packages
+    configuration: $(BuildConfiguration)
+    arguments: /p:PackageId="Portable.BouncyCastle" 
+  displayName: Build  
+  
+- task: DotNetCoreCLI@2
+  inputs:
+    command: test
+    projects: .\crypto\test\crypto.test.csproj
+    arguments: -c $(BuildConfiguration) --collect:"Code Coverage" -s $(System.DefaultWorkingDirectory)\CodeCoverage.runsettings /p:DebugType=portable
+  displayName: Run Tests
+  
+- task: PowerShell@2
+  displayName: Authenticode Sign artifacts
+  inputs:
+    filePath: scripts/Sign-Package.ps1
+  env:
+    SignClientUser: $(SignClientUser)
+    SignClientSecret: $(SignClientSecret)
+    ArtifactDirectory: $(Build.ArtifactStagingDirectory)\Packages
+  condition: and(succeeded(), not(eq(variables['build.reason'], 'PullRequest')), not(eq(variables['SignClientSecret'], '')), not(eq(variables['SignClientUser'], '')))
+
+- task: PublishBuildArtifacts@1
+  displayName: Publish Package Artifacts
+  inputs:
+    pathToPublish: $(Build.ArtifactStagingDirectory)\Packages
+    artifactType: container
+    artifactName: Packages
